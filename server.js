@@ -1,64 +1,63 @@
-package com.demo.chat;
+const express = require('express');
+const app = express();
+const cors = require('cors');
 
-import io.socket.client.IO;
-import io.socket.client.Socket;
-import io.socket.emitter.Emitter;
-import org.json.JSONObject;
+app.use(cors());
+app.use(express.json());
 
-import javax.swing.*;
-import java.net.URISyntaxException;
+const http = require("http").createServer(app);
+const io = require("socket.io")(http, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
-public class SocketClient {
-    private Socket socket;
-    private JTextArea messageArea;
-    private String username;
+const userSockets = {}; // Map username => socket.id
 
-    public SocketClient(JTextArea messageArea, String username) {
-        this.messageArea = messageArea;
-        this.username = username;
-        try {
-            socket = IO.socket("https://chat-server-5s97.onrender.com");
-            socket.on(Socket.EVENT_CONNECT, args -> {
-                appendMessage("[System] Đã kết nối tới máy chủ chat.");
-                socket.emit("register", username); // Đăng ký username khi kết nối
-            });
-            socket.on("chat_message", onChatMessage);
-            socket.on("private_message", onPrivateMessage);
-            socket.connect();
-        } catch (URISyntaxException e) {
-            appendMessage("[Lỗi] Không thể kết nối: " + e.getMessage());
+app.get("/", (req, res) => {
+    res.send("Socket.IO server is running!");
+});
+
+io.on("connection", socket => {
+    console.log("Client connected:", socket.id);
+
+    // Nhận username đăng ký
+    socket.on("register", username => {
+        userSockets[username] = socket.id;
+        console.log(`✅ ${username} registered with socket ID ${socket.id}`);
+    });
+
+    // Nhận tin nhắn nội bộ và broadcast lại
+    socket.on("chat_message", msg => {
+        console.log("📩 Public:", msg);
+        io.emit("chat_message", msg);
+    });
+
+    // Nhận tin nhắn riêng và chuyển đến người nhận
+    socket.on("private_message", msg => {
+        console.log("📩 Private from", msg.from, "to", msg.to);
+        const toId = userSockets[msg.to];
+        if (toId) {
+            io.to(toId).emit("private_message", msg);
+        } else {
+            console.log("❌ Không tìm thấy người nhận:", msg.to);
         }
-    }
+    });
 
-    public void sendMessage(String username, String message) {
-        JSONObject msg = new JSONObject();
-        msg.put("username", username);
-        msg.put("message", message);
-        System.out.println("📤 Sending (public): " + msg);
-        socket.emit("chat_message", msg);
-    }
+    socket.on("disconnect", () => {
+        console.log("Client disconnected:", socket.id);
+        for (let user in userSockets) {
+            if (userSockets[user] === socket.id) {
+                console.log(`❌ ${user} has disconnected.`);
+                delete userSockets[user];
+                break;
+            }
+        }
+    });
+});
 
-    public void sendPrivateMessage(JSONObject msg) {
-        System.out.println("📤 Sending (private): " + msg);
-        socket.emit("private_message", msg);
-    }
-
-    private final Emitter.Listener onChatMessage = args -> {
-        JSONObject msg = (JSONObject) args[0];
-        System.out.println("📥 Received from server (public): " + msg);
-        String text = msg.getString("username") + ": " + msg.getString("message");
-        appendMessage(text);
-    };
-
-    private final Emitter.Listener onPrivateMessage = args -> {
-        JSONObject msg = (JSONObject) args[0];
-        System.out.println("📥 Received from server (private): " + msg);
-        String from = msg.optString("from", "???");
-        String text = from + " (riêng): " + msg.getString("message");
-        appendMessage(text);
-    };
-
-    private void appendMessage(String msg) {
-        SwingUtilities.invokeLater(() -> messageArea.append(msg + "\n"));
-    }
-}
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => {
+    console.log("Server running on port " + PORT);
+});
