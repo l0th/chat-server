@@ -1,43 +1,64 @@
-const express = require('express');
-const app = express();
-const cors = require('cors');
+package com.demo.chat;
 
-app.use(cors());
-app.use(express.json());
+import io.socket.client.IO;
+import io.socket.client.Socket;
+import io.socket.emitter.Emitter;
+import org.json.JSONObject;
 
-// Test route
-app.get("/", (req, res) => {
-    res.send("Socket.IO server is running!");
-});
+import javax.swing.*;
+import java.net.URISyntaxException;
 
-const http = require("http").createServer(app);
+public class SocketClient {
+    private Socket socket;
+    private JTextArea messageArea;
+    private String username;
 
-const io = require("socket.io")(http, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
+    public SocketClient(JTextArea messageArea, String username) {
+        this.messageArea = messageArea;
+        this.username = username;
+        try {
+            socket = IO.socket("https://chat-server-5s97.onrender.com");
+            socket.on(Socket.EVENT_CONNECT, args -> {
+                appendMessage("[System] Đã kết nối tới máy chủ chat.");
+                socket.emit("register", username); // Đăng ký username khi kết nối
+            });
+            socket.on("chat_message", onChatMessage);
+            socket.on("private_message", onPrivateMessage);
+            socket.connect();
+        } catch (URISyntaxException e) {
+            appendMessage("[Lỗi] Không thể kết nối: " + e.getMessage());
+        }
     }
-});
 
-// Lắng nghe client connect
-io.on("connection", socket => {
-    console.log("Client connected:", socket.id);
+    public void sendMessage(String username, String message) {
+        JSONObject msg = new JSONObject();
+        msg.put("username", username);
+        msg.put("message", message);
+        System.out.println("📤 Sending (public): " + msg);
+        socket.emit("chat_message", msg);
+    }
 
-    // Khi client gửi tin nhắn
-    socket.on("chat_message", msg => {
-        console.log("Message:", msg);
+    public void sendPrivateMessage(JSONObject msg) {
+        System.out.println("📤 Sending (private): " + msg);
+        socket.emit("private_message", msg);
+    }
 
-        // Gửi lại cho tất cả client
-        io.emit("chat_message", msg);
-    });
+    private final Emitter.Listener onChatMessage = args -> {
+        JSONObject msg = (JSONObject) args[0];
+        System.out.println("📥 Received from server (public): " + msg);
+        String text = msg.getString("username") + ": " + msg.getString("message");
+        appendMessage(text);
+    };
 
-    socket.on("disconnect", () => {
-        console.log("Client disconnected:", socket.id);
-    });
-});
+    private final Emitter.Listener onPrivateMessage = args -> {
+        JSONObject msg = (JSONObject) args[0];
+        System.out.println("📥 Received from server (private): " + msg);
+        String from = msg.optString("from", "???");
+        String text = from + " (riêng): " + msg.getString("message");
+        appendMessage(text);
+    };
 
-// Chạy server
-const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
-});
+    private void appendMessage(String msg) {
+        SwingUtilities.invokeLater(() -> messageArea.append(msg + "\n"));
+    }
+}
