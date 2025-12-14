@@ -22,8 +22,8 @@ app.get("/", (req, res) => {
 io.on("connection", socket => {
     console.log("Client connected:", socket.id);
 
-    // Nhận username đăng ký
-    socket.on("register", username => {
+    socket.on("identify", data => {
+        const username = data.username;
         userSockets[username] = socket.id;
         console.log(`✅ ${username} registered with socket ID ${socket.id}`);
     });
